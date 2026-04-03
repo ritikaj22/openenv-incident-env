@@ -1,0 +1,81 @@
+name: incident-response-env
+version: "1.0.0"
+description: >
+  An RL environment where an AI SRE agent must diagnose and resolve production
+  incidents in a stateful simulated system. The agent observes service metrics,
+  alerts, and logs (partially hidden), and must take the correct sequence of
+  actions to restore all services to healthy status.
+
+entry_point: env.environment:IncidentEnv
+
+author: hackathon-team
+tags:
+  - incident-response
+  - sre
+  - operations
+  - multi-step
+  - real-world
+
+tasks:
+  - name: easy
+    description: Single service CPU spike. Agent must identify and scale the overloaded service.
+    difficulty: easy
+    max_steps: 20
+    grader: graders.graders:grade_easy
+
+  - name: medium
+    description: >
+      Out-of-memory crash buried in noisy logs causes upstream degradation.
+      Agent must check logs, identify the crashed service, and restart the correct pod.
+    difficulty: medium
+    max_steps: 20
+    grader: graders.graders:grade_medium
+
+  - name: hard
+    description: >
+      A bad deploy triggers a cascading failure across auth → db → api.
+      Agent must run full diagnostics, identify the bad deploy version, rollback,
+      verify recovery, and close the incident.
+    difficulty: hard
+    max_steps: 20
+    grader: graders.graders:grade_hard
+
+observation_space:
+  services: "Dict[str, ServiceState] — CPU, memory, status, error_rate, latency per service"
+  alerts: "List[str] — active alert messages"
+  visible_logs: "List[str] — log lines revealed after check_logs action"
+  deploy_versions: "Dict[str, str] — current deploy version per service"
+  step_number: "int — current step in episode"
+  incident_active: "bool — whether incident is still ongoing"
+  time_elapsed: "int — seconds elapsed since incident start"
+  available_actions: "List[str] — valid action types"
+
+action_space:
+  check_logs: "Reveal system log lines (hidden by default)"
+  check_metrics: "Get updated metric snapshot for all services"
+  scale_service: "Scale up a service (target_service required)"
+  restart_pod: "Restart a service pod (target_service required)"
+  rollback_deploy: "Rollback deploy to previous version (target_service required)"
+  page_oncall: "Page on-call engineer (penalty applied)"
+  verify_recovery: "Verify all services are healthy before closing"
+  mark_resolved: "Close the incident (episode ends)"
+
+reward_structure:
+  check_logs: "+0.1 first time, -0.05 if repeated"
+  check_metrics: "+0.05"
+  root_cause_inferred: "+0.2 when correct root cause revealed"
+  correct_fix: "+0.4"
+  recovery_verified: "+0.15"
+  correct_resolution: "+0.2"
+  speed_bonus: "up to +0.15 for fast resolution"
+  wrong_service_restart: "-0.15"
+  unnecessary_rollback: "-0.20"
+  premature_resolution: "-0.50"
+  page_oncall: "-0.10"
+
+api_endpoints:
+  - POST /reset  — initialize episode (body: {scenario, seed})
+  - POST /step   — take action (body: {action_type, target_service, parameters})
+  - GET  /state  — current state snapshot
+  - GET  /tasks  — list all tasks
+  - GET  /health — health check
