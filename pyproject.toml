@@ -12,9 +12,16 @@ dependencies = [
   "fastapi",
   "uvicorn",
   "pydantic",
-  "requests"
+  "requests",
+  "openenv"
 ]
+
+[project.scripts]
+server = "app:app"
 
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.openenv]
+version = "0.2.0"
