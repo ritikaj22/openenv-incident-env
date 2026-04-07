@@ -1,7 +1,10 @@
 import requests
 import os
 import time
-from openai import OpenAI
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 # Required environment variables
 API_BASE_URL = os.getenv(
@@ -13,11 +16,16 @@ API_KEY = os.getenv("API_KEY")  # IMPORTANT: use injected key
 
 BASE_URL = API_BASE_URL
 
-# Initialize OpenAI client with proxy
-client = OpenAI(
-    api_key=API_KEY,
-    base_url=API_BASE_URL
-)
+client = None
+if OpenAI:
+    try:
+        client = OpenAI(
+            api_key=os.getenv("API_KEY"),
+            base_url=os.getenv("API_BASE_URL")
+        )
+    except Exception:
+        client = None
+
 
 
 def call_env(endpoint, method="GET", data=None):
@@ -36,9 +44,12 @@ def call_env(endpoint, method="GET", data=None):
 
 # 🔥 REQUIRED: LLM proxy call
 def call_llm(prompt):
+    if not client:
+        return "fallback"
+
     try:
         response = client.chat.completions.create(
-            model=MODEL_NAME,
+            model=os.getenv("MODEL_NAME", "gpt-4o-mini"),
             messages=[{"role": "user", "content": prompt}],
             max_tokens=10
         )
@@ -46,7 +57,6 @@ def call_llm(prompt):
     except Exception as e:
         print("[WARN] LLM call failed:", e)
         return "fallback"
-
 
 def decide_action(obs):
     # 🔥 THIS LINE IS CRITICAL FOR VALIDATION
