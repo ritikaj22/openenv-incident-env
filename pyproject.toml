@@ -1,0 +1,20 @@
+[project]
+name = "openenv-incident-env"
+version = "0.1.0"
+description = "OpenEnv Incident Response Environment"
+authors = [
+  { name = "Ritika Jain" }
+]
+readme = "README.md"
+requires-python = ">=3.9"
+
+dependencies = [
+  "fastapi",
+  "uvicorn",
+  "pydantic",
+  "requests"
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
