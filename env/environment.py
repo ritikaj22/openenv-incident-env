@@ -61,11 +61,11 @@ class IncidentEnv:
         self._system: Dict[str, Any] = {}
         self._full_logs: List[str] = []
 
-    # ------------------------------------------------------------------ #
-    #  OpenEnv API                                                         #
-    # ------------------------------------------------------------------ #
+    def reset(self, task: Optional[str] = None) -> Observation:
+    # If task is provided, override scenario
+        if task:
+         self.scenario = task
 
-    def reset(self) -> Observation:
         self._step_count = 0
         self._cumulative_reward = 0.0
         self._action_log = []
@@ -80,6 +80,8 @@ class IncidentEnv:
 
         self._setup_scenario()
         return self._build_observation()
+
+
 
     def step(self, action: Action) -> Tuple[Observation, Reward, bool, Dict]:
         if self._done:
