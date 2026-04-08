@@ -137,7 +137,7 @@ def run_task(task):
 
         time.sleep(0.2)
 
-    score = max(0.0, min(1.0, total_reward))
+    score = max(0.001, min(0.999, total_reward))
 
     print("[END]")
     print(f"score: {round(score, 3)}")
