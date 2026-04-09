@@ -49,7 +49,7 @@ def call_env(endpoint, method="GET", data=None):
         return {}
 
 
-# ------------------ LLM CALL (REQUIRED - DO NOT REMOVE) ------------------
+# ------------------ LLM CALL (REQUIRED - DO NOT CHANGE) ------------------
 
 def call_llm(prompt):
     if not client:
@@ -70,8 +70,8 @@ def call_llm(prompt):
 # ------------------ AGENT LOGIC ------------------
 
 def decide_action(obs, task, action_history):
-    """Reliable deterministic agent for all three scenarios."""
-    # REQUIRED dummy LLM call - do not remove or modify
+    """Reliable rule-based agent for all tasks."""
+    # REQUIRED dummy LLM call - do not remove
     call_llm("Analyze system logs briefly")
 
     done_actions = set(action_history)
@@ -102,11 +102,10 @@ def decide_action(obs, task, action_history):
         else:
             return {"action_type": "mark_resolved"}
 
-    # Fallback
     return {"action_type": "check_logs"}
 
 
-# ------------------ GRADERS (inlined - unchanged) ------------------
+# ------------------ GRADERS (inlined) ------------------
 
 def _clamp(score):
     return round(max(0.001, min(0.999, score)), 4)
@@ -129,8 +128,11 @@ def grade_medium(action_log, final_state):
     if "check_logs" in action_log:
         score += 0.25
         if "restart_pod" in action_log:
-            if action_log.index("check_logs") < action_log.index("restart_pod"):
-                score += 0.1
+            try:
+                if action_log.index("check_logs") < action_log.index("restart_pod"):
+                    score += 0.1
+            except ValueError:
+                pass
     if "restart_pod" in action_log:
         score += 0.35
     db_status = final_state.get("system_snapshot", {}).get("db", {}).get("status", "")
@@ -147,9 +149,12 @@ def grade_hard(action_log, final_state):
     if "check_logs" in action_log:
         score += 0.1
     if all(x in action_log for x in ["check_metrics", "check_logs", "rollback_deploy"]):
-        if (action_log.index("check_metrics") < action_log.index("rollback_deploy")
-                and action_log.index("check_logs") < action_log.index("rollback_deploy")):
-            score += 0.15
+        try:
+            if (action_log.index("check_metrics") < action_log.index("rollback_deploy") and
+                action_log.index("check_logs") < action_log.index("rollback_deploy")):
+                score += 0.15
+        except ValueError:
+            pass
     if "rollback_deploy" in action_log:
         score += 0.3
     if "verify_recovery" in action_log:
@@ -172,14 +177,13 @@ def run_task(task):
 
     if "observation" not in res:
         print("[ERROR] Reset failed:", res)
-        print("[END]")
         print("score: 0.001\n")
         return
 
     obs = res["observation"]
     action_history = []
 
-    for step in range(12):
+    for step in range(15):
         action = decide_action(obs, task, action_history)
 
         result = call_env("/step", "POST", action)
@@ -189,16 +193,11 @@ def run_task(task):
             break
 
         obs = result["observation"]
-        reward_obj = result.get("reward", 0)
-        reward = (
-            reward_obj.get("step_reward", 0)
-            if isinstance(reward_obj, dict)
-            else reward_obj
-        )
+        reward_obj = result.get("reward", {})
+        reward = reward_obj.get("step_reward", 0) if isinstance(reward_obj, dict) else reward_obj
 
         done = result.get("done", False)
-
-        action_history.append(action["action_type"])
+        action_history.append(action.get("action_type"))
 
         print("[STEP]")
         print(f"step: {step + 1}")
@@ -209,14 +208,15 @@ def run_task(task):
         if done:
             break
 
-        time.sleep(0.15)
+        time.sleep(0.2)
 
-    # Final scoring with deterministic graders
+    # Get final state for grading
     try:
         final_state = call_env("/state")
         if not isinstance(final_state, dict):
             final_state = {}
-    except Exception:
+    except Exception as e:
+        print("[WARN] Could not fetch final state:", e)
         final_state = {}
 
     action_log = final_state.get("action_log", [])
