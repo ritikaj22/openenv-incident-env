@@ -10,14 +10,11 @@ except ImportError:
 
 # ------------------ ENV VARIABLES ------------------
 
-# LLM proxy (injected by evaluator)
 API_BASE_URL = os.getenv("API_BASE_URL")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
 API_KEY = os.getenv("API_KEY")
 
-# Your deployed environment (HF Space)
 ENV_BASE_URL = "https://ritikaj22-openenv-incident-env.hf.space"
-
 BASE_URL = ENV_BASE_URL
 
 # ------------------ OPENAI CLIENT ------------------
@@ -25,10 +22,7 @@ BASE_URL = ENV_BASE_URL
 client = None
 if OpenAI and API_BASE_URL and API_KEY:
     try:
-        client = OpenAI(
-            api_key=API_KEY,
-            base_url=API_BASE_URL
-        )
+        client = OpenAI(api_key=API_KEY, base_url=API_BASE_URL)
     except Exception:
         client = None
 
@@ -39,13 +33,12 @@ def call_env(endpoint, method="GET", data=None):
     url = f"{BASE_URL}{endpoint}"
     try:
         if method == "POST":
-            res = requests.post(url, json=data)
+            res = requests.post(url, json=data, timeout=10)
         else:
-            res = requests.get(url)
-
+            res = requests.get(url, timeout=10)
         return res.json()
     except Exception as e:
-        print("[ERROR] API call failed:", e)
+        print(f"[ERROR] API call failed: {e}")
         return {}
 
 
@@ -54,7 +47,6 @@ def call_env(endpoint, method="GET", data=None):
 def call_llm(prompt):
     if not client:
         return "fallback"
-
     try:
         response = client.chat.completions.create(
             model=MODEL_NAME,
@@ -63,15 +55,14 @@ def call_llm(prompt):
         )
         return response.choices[0].message.content
     except Exception as e:
-        print("[WARN] LLM call failed:", e)
+        print(f"[WARN] LLM call failed: {e}")
         return "fallback"
 
 
 # ------------------ AGENT LOGIC ------------------
 
 def decide_action(obs, task, action_history):
-    """Reliable rule-based agent for all tasks."""
-    # REQUIRED dummy LLM call - do not remove
+    # REQUIRED dummy LLM call
     call_llm("Analyze system logs briefly")
 
     done_actions = set(action_history)
@@ -79,33 +70,30 @@ def decide_action(obs, task, action_history):
     if task == "easy":
         if "scale_service" not in done_actions:
             return {"action_type": "scale_service", "target_service": "api"}
-        else:
-            return {"action_type": "mark_resolved"}
+        return {"action_type": "mark_resolved"}
 
     elif task == "medium":
         if "check_logs" not in done_actions:
             return {"action_type": "check_logs"}
-        elif "restart_pod" not in done_actions:
+        if "restart_pod" not in done_actions:
             return {"action_type": "restart_pod", "target_service": "db"}
-        else:
-            return {"action_type": "mark_resolved"}
+        return {"action_type": "mark_resolved"}
 
     elif task == "hard":
         if "check_metrics" not in done_actions:
             return {"action_type": "check_metrics"}
-        elif "check_logs" not in done_actions:
+        if "check_logs" not in done_actions:
             return {"action_type": "check_logs"}
-        elif "rollback_deploy" not in done_actions:
+        if "rollback_deploy" not in done_actions:
             return {"action_type": "rollback_deploy", "target_service": "auth"}
-        elif "verify_recovery" not in done_actions:
+        if "verify_recovery" not in done_actions:
             return {"action_type": "verify_recovery"}
-        else:
-            return {"action_type": "mark_resolved"}
+        return {"action_type": "mark_resolved"}
 
     return {"action_type": "check_logs"}
 
 
-# ------------------ GRADERS (inlined) ------------------
+# ------------------ GRADERS ------------------
 
 def _clamp(score):
     return round(max(0.001, min(0.999, score)), 4)
@@ -174,7 +162,6 @@ def run_task(task):
     print(f"task: {task}")
 
     res = call_env("/reset", "POST", {"task": task})
-
     if "observation" not in res:
         print("[ERROR] Reset failed:", res)
         print("score: 0.001\n")
@@ -187,7 +174,6 @@ def run_task(task):
         action = decide_action(obs, task, action_history)
 
         result = call_env("/step", "POST", action)
-
         if "observation" not in result:
             print("[ERROR] Step failed:", result)
             break
@@ -197,7 +183,7 @@ def run_task(task):
         reward = reward_obj.get("step_reward", 0) if isinstance(reward_obj, dict) else reward_obj
 
         done = result.get("done", False)
-        action_history.append(action.get("action_type"))
+        action_history.append(action.get("action_type", ""))
 
         print("[STEP]")
         print(f"step: {step + 1}")
@@ -208,15 +194,15 @@ def run_task(task):
         if done:
             break
 
-        time.sleep(0.2)
+        time.sleep(0.25)
 
-    # Get final state for grading
+    # Final state for grading
     try:
         final_state = call_env("/state")
         if not isinstance(final_state, dict):
             final_state = {}
     except Exception as e:
-        print("[WARN] Could not fetch final state:", e)
+        print(f"[WARN] Failed to fetch final state: {e}")
         final_state = {}
 
     action_log = final_state.get("action_log", [])
