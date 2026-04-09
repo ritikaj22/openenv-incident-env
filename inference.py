@@ -185,7 +185,7 @@ def run_task(task):
         print("[STEP]")
         print(f"step: {step + 1}")
         print(f"action: {action}")
-        print(f"reward: {reward}")
+        print(f"step_reward: {reward}")
         print(f"done: {done}")
 
         if done:
@@ -194,7 +194,12 @@ def run_task(task):
         time.sleep(0.2)
 
     # Use deterministic graders on final state for accurate scoring
-    final_state = call_env("/state")
+    try:
+        final_state = call_env("/state")
+        if not isinstance(final_state, dict):
+            final_state = {}
+    except Exception:
+        final_state = {}
     action_log = final_state.get("action_log", [])
 
     if task == "easy":
