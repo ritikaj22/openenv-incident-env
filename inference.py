@@ -1,6 +1,7 @@
 import requests
 import os
 import time
+from graders import grade_easy, grade_medium, grade_hard
 
 # Safe OpenAI import
 try:
@@ -98,7 +99,7 @@ def run_task(task):
     if "observation" not in res:
         print("[ERROR] Reset failed:", res)
         print("[END]")
-        print("score: 0.0\n")
+        print("score: 0.001\n")
         return
 
     obs = res["observation"]
@@ -137,10 +138,19 @@ def run_task(task):
 
         time.sleep(0.2)
 
-    score = max(0.001, min(0.999, total_reward))
+    # Use deterministic graders on final state for accurate scoring
+    final_state = call_env("/state")
+    action_log = final_state.get("action_log", [])
+
+    if task == "easy":
+        score = grade_easy(action_log, final_state)
+    elif task == "medium":
+        score = grade_medium(action_log, final_state)
+    else:
+        score = grade_hard(action_log, final_state)
 
     print("[END]")
-    print(f"score: {round(score, 3)}")
+    print(f"score: {round(score, 4)}")
     print("")
 
 
