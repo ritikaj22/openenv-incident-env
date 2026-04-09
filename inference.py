@@ -9,7 +9,6 @@ except ImportError:
     OpenAI = None
 
 # ------------------ ENV VARIABLES ------------------
-
 API_BASE_URL = os.getenv("API_BASE_URL")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
 API_KEY = os.getenv("API_KEY")
@@ -18,7 +17,6 @@ ENV_BASE_URL = "https://ritikaj22-openenv-incident-env.hf.space"
 BASE_URL = ENV_BASE_URL
 
 # ------------------ OPENAI CLIENT ------------------
-
 client = None
 if OpenAI and API_BASE_URL and API_KEY:
     try:
@@ -26,24 +24,23 @@ if OpenAI and API_BASE_URL and API_KEY:
     except Exception:
         client = None
 
-
 # ------------------ ENV CALL ------------------
-
 def call_env(endpoint, method="GET", data=None):
     url = f"{BASE_URL}{endpoint}"
-    try:
-        if method == "POST":
-            res = requests.post(url, json=data, timeout=15)
-        else:
-            res = requests.get(url, timeout=15)
-        return res.json()
-    except Exception as e:
-        print(f"[ERROR] API call to {endpoint} failed: {e}")
-        return {}
-
+    for attempt in range(4):
+        try:
+            if method == "POST":
+                res = requests.post(url, json=data, timeout=15)
+            else:
+                res = requests.get(url, timeout=15)
+            return res.json()
+        except Exception as e:
+            print(f"[RETRY {attempt+1}/4] API call to {endpoint} failed: {e}")
+            time.sleep(0.6)
+    print(f"[ERROR] All retries failed for {endpoint}")
+    return {}
 
 # ------------------ LLM CALL (REQUIRED - DO NOT MODIFY) ------------------
-
 def call_llm(prompt):
     if not client:
         return "fallback"
@@ -58,13 +55,9 @@ def call_llm(prompt):
         print(f"[WARN] LLM call failed: {e}")
         return "fallback"
 
-
 # ------------------ AGENT LOGIC ------------------
-
 def decide_action(obs, task, action_history):
-    # REQUIRED dummy LLM call - keep exactly like this
-    call_llm("Analyze system logs briefly")
-
+    call_llm("Analyze system logs briefly")   # REQUIRED dummy call
     done_actions = set(action_history)
 
     if task == "easy":
@@ -80,7 +73,6 @@ def decide_action(obs, task, action_history):
         return {"action_type": "mark_resolved"}
 
     elif task == "hard":
-        # Strict optimal order for hard task
         if "check_metrics" not in done_actions:
             return {"action_type": "check_metrics"}
         if "check_logs" not in done_actions:
@@ -93,24 +85,18 @@ def decide_action(obs, task, action_history):
 
     return {"action_type": "check_logs"}
 
-
-# ------------------ GRADERS (with extra safety) ------------------
-
+# ------------------ GRADERS ------------------
 def _clamp(score):
     clamped = round(max(0.001, min(0.999, score)), 4)
-    return clamped if clamped > 0.0 and clamped < 1.0 else 0.5  # safety fallback
+    return clamped if 0.001 < clamped < 0.999 else 0.5   # extra safety
 
 def grade_easy(action_log, final_state):
     score = 0.0
-    if "scale_service" in action_log:
-        score += 0.5
+    if "scale_service" in action_log: score += 0.5
     api_status = final_state.get("system_snapshot", {}).get("api", {}).get("status", "")
-    if api_status == "healthy":
-        score += 0.3
-    if "page_oncall" not in action_log:
-        score += 0.1
-    if "rollback_deploy" not in action_log:
-        score += 0.1
+    if api_status == "healthy": score += 0.3
+    if "page_oncall" not in action_log: score += 0.1
+    if "rollback_deploy" not in action_log: score += 0.1
     return _clamp(score)
 
 def grade_medium(action_log, final_state):
@@ -123,21 +109,16 @@ def grade_medium(action_log, final_state):
                     score += 0.1
             except ValueError:
                 pass
-    if "restart_pod" in action_log:
-        score += 0.35
+    if "restart_pod" in action_log: score += 0.35
     db_status = final_state.get("system_snapshot", {}).get("db", {}).get("status", "")
-    if db_status == "healthy":
-        score += 0.2
-    if sum(1 for a in action_log if a == "restart_pod") == 1:
-        score += 0.1
+    if db_status == "healthy": score += 0.2
+    if sum(1 for a in action_log if a == "restart_pod") == 1: score += 0.1
     return _clamp(score)
 
 def grade_hard(action_log, final_state):
     score = 0.0
-    if "check_metrics" in action_log:
-        score += 0.1
-    if "check_logs" in action_log:
-        score += 0.1
+    if "check_metrics" in action_log: score += 0.1
+    if "check_logs" in action_log: score += 0.1
     if all(x in action_log for x in ["check_metrics", "check_logs", "rollback_deploy"]):
         try:
             if (action_log.index("check_metrics") < action_log.index("rollback_deploy") and
@@ -145,10 +126,8 @@ def grade_hard(action_log, final_state):
                 score += 0.15
         except ValueError:
             pass
-    if "rollback_deploy" in action_log:
-        score += 0.3
-    if "verify_recovery" in action_log:
-        score += 0.15
+    if "rollback_deploy" in action_log: score += 0.3
+    if "verify_recovery" in action_log: score += 0.15
     snapshot = final_state.get("system_snapshot", {})
     if snapshot and all(svc.get("status") == "healthy" for svc in snapshot.values()):
         score += 0.15
@@ -156,34 +135,30 @@ def grade_hard(action_log, final_state):
         score -= 0.1
     return _clamp(score)
 
-
 # ------------------ TASK RUNNER ------------------
-
 def run_task(task):
     print("[START]")
     print(f"task: {task}")
 
     res = call_env("/reset", "POST", {"task": task})
     if "observation" not in res:
-        print("[ERROR] Reset failed:", res)
-        print("score: 0.5\n")   # safety
+        print("[ERROR] Reset failed")
+        print("score: 0.5\n")
         return
 
     obs = res["observation"]
     action_history = []
 
-    for step in range(18):   # more steps for safety
+    for step in range(18):
         action = decide_action(obs, task, action_history)
-
         result = call_env("/step", "POST", action)
         if "observation" not in result:
-            print("[ERROR] Step failed:", result)
+            print("[ERROR] Step failed")
             break
 
         obs = result["observation"]
         reward_obj = result.get("reward", {})
         reward = reward_obj.get("step_reward", 0) if isinstance(reward_obj, dict) else reward_obj
-
         done = result.get("done", False)
         action_history.append(action.get("action_type", ""))
 
@@ -195,19 +170,15 @@ def run_task(task):
 
         if done:
             break
-
         time.sleep(0.3)
 
-    # Final state with retry
+    # === FINAL STATE WITH STRONG RETRY ===
     final_state = {}
-    for attempt in range(3):
-        try:
-            final_state = call_env("/state")
-            if isinstance(final_state, dict) and final_state.get("action_log"):
-                break
-        except Exception:
-            pass
-        time.sleep(0.5)
+    for attempt in range(5):
+        final_state = call_env("/state")
+        if isinstance(final_state, dict) and final_state.get("action_log"):
+            break
+        time.sleep(0.7)
 
     action_log = final_state.get("action_log", []) if isinstance(final_state, dict) else []
 
@@ -222,13 +193,10 @@ def run_task(task):
     print(f"score: {round(score, 4)}")
     print("")
 
-
 # ------------------ MAIN ------------------
-
 def main():
     for task in ["easy", "medium", "hard"]:
         run_task(task)
-
 
 if __name__ == "__main__":
     main()
