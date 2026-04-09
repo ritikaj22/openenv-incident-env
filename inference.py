@@ -1,7 +1,6 @@
 import requests
 import os
 import time
-from graders import grade_easy, grade_medium, grade_hard
 
 # Safe OpenAI import
 try:
@@ -86,6 +85,62 @@ def decide_action(obs):
         return {"action_type": "check_metrics"}
 
     return {"action_type": "check_logs"}
+
+
+# ------------------ GRADERS (inlined) ------------------
+
+def _clamp(score):
+    return round(max(0.001, min(0.999, score)), 4)
+
+def grade_easy(action_log, final_state):
+    score = 0.0
+    if "scale_service" in action_log:
+        score += 0.5
+    api_status = final_state.get("system_snapshot", {}).get("api", {}).get("status", "")
+    if api_status == "healthy":
+        score += 0.3
+    if "page_oncall" not in action_log:
+        score += 0.1
+    if "rollback_deploy" not in action_log:
+        score += 0.1
+    return _clamp(score)
+
+def grade_medium(action_log, final_state):
+    score = 0.0
+    if "check_logs" in action_log:
+        score += 0.25
+        if "restart_pod" in action_log:
+            if action_log.index("check_logs") < action_log.index("restart_pod"):
+                score += 0.1
+    if "restart_pod" in action_log:
+        score += 0.35
+    db_status = final_state.get("system_snapshot", {}).get("db", {}).get("status", "")
+    if db_status == "healthy":
+        score += 0.2
+    if sum(1 for a in action_log if a == "restart_pod") == 1:
+        score += 0.1
+    return _clamp(score)
+
+def grade_hard(action_log, final_state):
+    score = 0.0
+    if "check_metrics" in action_log:
+        score += 0.1
+    if "check_logs" in action_log:
+        score += 0.1
+    if all(x in action_log for x in ["check_metrics", "check_logs", "rollback_deploy"]):
+        if (action_log.index("check_metrics") < action_log.index("rollback_deploy")
+                and action_log.index("check_logs") < action_log.index("rollback_deploy")):
+            score += 0.15
+    if "rollback_deploy" in action_log:
+        score += 0.3
+    if "verify_recovery" in action_log:
+        score += 0.15
+    snapshot = final_state.get("system_snapshot", {})
+    if snapshot and all(svc.get("status") == "healthy" for svc in snapshot.values()):
+        score += 0.15
+    if "restart_pod" in action_log and "rollback_deploy" not in action_log:
+        score -= 0.1
+    return _clamp(score)
 
 
 # ------------------ TASK RUNNER ------------------
